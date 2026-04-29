@@ -1,32 +1,104 @@
 import { ai } from "@/lib/gemini";
-import type { Message } from "@/types/chat";
+import type { ChatRequestMessage, Message, RequestAttachment } from "@/types/chat";
 
-export function buildRecentMessages(messages: Message[], memoryTurns: number) {
+type MemoryLanguage = "zh-TW" | "en";
+
+type GeminiPart =
+  | { text: string }
+  | { inlineData: { mimeType: string; data: string } };
+
+function dataUrlToBase64(dataUrl: string) {
+  const [, base64 = ""] = dataUrl.split(",", 2);
+  return base64;
+}
+
+function buildAttachmentParts(attachments: RequestAttachment[] = []): GeminiPart[] {
+  const parts: GeminiPart[] = [];
+
+  for (const attachment of attachments) {
+    const data = dataUrlToBase64(attachment.dataUrl);
+    if (!data) {
+      continue;
+    }
+
+    parts.push({
+      inlineData: {
+        mimeType: attachment.mimeType,
+        data,
+      },
+    });
+  }
+
+  return parts;
+}
+
+function describeAttachments(
+  attachments: Array<{ kind: string; name: string }> = [],
+  language: MemoryLanguage = "zh-TW"
+) {
+  if (attachments.length === 0) return "";
+
+  return attachments
+    .map((attachment) =>
+      language === "en"
+        ? `[${attachment.kind.toUpperCase()}] ${attachment.name}`
+        : `[${attachment.kind.toUpperCase()}] ${attachment.name}`
+    )
+    .join(language === "en" ? ", " : "、");
+}
+
+export function buildRecentMessages(
+  messages: ChatRequestMessage[],
+  memoryTurns: number
+) {
   const recentCount = Math.max(memoryTurns * 2, 2);
   return messages.slice(-recentCount);
 }
 
-export function toGeminiContents(memorySummary: string, recentMessages: Message[]) {
+export function toGeminiContents(
+  memorySummary: string,
+  recentMessages: ChatRequestMessage[],
+  longTermMemoryContext = ""
+) {
   const contents: Array<{
     role: "user" | "model";
-    parts: Array<{ text: string }>;
+    parts: GeminiPart[];
   }> = [];
+
+  if (longTermMemoryContext.trim()) {
+    contents.push({
+      role: "user",
+      parts: [{ text: longTermMemoryContext }],
+    });
+  }
 
   if (memorySummary.trim()) {
     contents.push({
       role: "user",
       parts: [
         {
-          text: `以下是這段對話較早內容的摘要，請把它當成背景記憶參考：\n${memorySummary}`,
+          text: `先前對話摘要：\n${memorySummary}`,
         },
       ],
     });
   }
 
-  for (const msg of recentMessages) {
+  for (const message of recentMessages) {
+    const parts: GeminiPart[] = [];
+
+    if (message.content.trim()) {
+      parts.push({ text: message.content });
+    }
+
+    parts.push(...buildAttachmentParts(message.attachments));
+
+    if (parts.length === 0) {
+      parts.push({ text: "使用者送出了一則空白訊息。" });
+    }
+
     contents.push({
-      role: msg.role === "assistant" ? "model" : "user",
-      parts: [{ text: msg.content }],
+      role: message.role === "assistant" ? "model" : "user",
+      parts,
     });
   }
 
@@ -37,7 +109,8 @@ export async function buildMemorySummary(
   allMessages: Message[],
   memoryTurns: number,
   previousSummary: string,
-  model: string
+  model: string,
+  language: MemoryLanguage = "zh-TW"
 ) {
   const cutoff = Math.max(allMessages.length - memoryTurns * 2, 0);
   const olderMessages = allMessages.slice(0, cutoff);
@@ -47,29 +120,40 @@ export async function buildMemorySummary(
   }
 
   const joined = olderMessages
-    .map((m) => `${m.role === "user" ? "使用者" : "助手"}：${m.content}`)
+    .map((message) => {
+      const attachments = describeAttachments(message.attachments, language);
+      const suffix =
+        attachments.length > 0
+          ? language === "en"
+            ? ` | Attachments: ${attachments}`
+            : ` | 附件：${attachments}`
+          : "";
+
+      return `${message.role === "user" ? (language === "en" ? "User" : "使用者") : language === "en" ? "Assistant" : "助理"}: ${message.content}${suffix}`;
+    })
     .join("\n");
 
+  const languageInstruction =
+    language === "en"
+      ? "Write the summary in English."
+      : "請將摘要以繁體中文撰寫。只有當使用者明確要求英文時才改用英文。";
+
   const prompt = `
-你是「對話短期記憶整理器」。
-請根據提供的先前摘要與較早對話內容，輸出一份更新後的短期記憶摘要。
+You maintain a concise rolling conversation summary for an AI assistant.
 
-規則：
-1. 只輸出摘要內容本身。
-2. 不要加入任何前言、開場白、解釋、客套話。
-3. 不要寫「好的」、「以下是摘要」、「這是根據目前對話整理的內容」這類句子。
-4. 使用繁體中文。
-5. 控制在 200 字內。
-6. 只保留對後續對話有幫助的資訊：使用者偏好、目前任務、已完成決策、重要上下文。
-7. 若沒有值得保留的新資訊，直接輸出先前摘要；若先前摘要也沒有內容，輸出「無」。
+Summarize only durable conversational context that helps future replies inside the same chat.
+- Keep it compact and factual.
+- Include user goals, constraints, preferences, and unresolved tasks.
+- Mention uploaded files only when they matter for later context.
+- Do not invent facts.
+- Keep the summary under 200 words.
+${languageInstruction}
 
-先前摘要：
-${previousSummary || "無"}
+Previous summary:
+${previousSummary || "(none)"}
 
-較早對話內容：
+Older conversation:
 ${joined}
-
-請直接輸出更新後的短期記憶摘要：
 `;
 
   const response = await ai.models.generateContent({
@@ -81,12 +165,5 @@ ${joined}
     },
   });
 
-  const rawText = response.text?.trim() ?? previousSummary;
-
-  return rawText
-    .replace(/^好的[，、,:：]?\s*/u, "")
-    .replace(/^以下是.*?摘要[：:]?\s*/u, "")
-    .replace(/^這是根據目前對話內容.*?[：:]?\s*/u, "")
-    .replace(/^短期對話摘要[：:]?\s*/u, "")
-    .trim();
+  return response.text?.trim() ?? previousSummary;
 }

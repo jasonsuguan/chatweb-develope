@@ -7,18 +7,22 @@ type ThemeMode = "dark" | "light";
 type ChatSidebarProps = {
   chats: ChatRoom[];
   activeChatId: number | null;
+  assetCount: number;
   onSelectChat: (id: number | null) => void;
   onCreateChat: () => void;
   onDeleteChat: (id: number) => void;
+  onOpenLibrary: () => void;
   theme: ThemeMode;
 };
 
 export default function ChatSidebar({
   chats,
   activeChatId,
+  assetCount,
   onSelectChat,
   onCreateChat,
   onDeleteChat,
+  onOpenLibrary,
   theme,
 }: ChatSidebarProps) {
   const isDark = theme === "dark";
@@ -37,7 +41,7 @@ export default function ChatSidebar({
             Chat Web
           </p>
           <h2 className={`mt-2 text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
-            聊天室
+            你的助理
           </h2>
         </div>
 
@@ -45,7 +49,18 @@ export default function ChatSidebar({
           onClick={onCreateChat}
           className="w-full rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-emerald-400 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-cyan-500/20 transition hover:scale-[1.01]"
         >
-          + 新增聊天室
+          + 新對話
+        </button>
+
+        <button
+          onClick={onOpenLibrary}
+          className={`mt-3 w-full rounded-2xl border px-4 py-3 text-sm transition ${
+            isDark
+              ? "border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
+              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          資料庫（{assetCount}）
         </button>
 
         <button
@@ -56,13 +71,13 @@ export default function ChatSidebar({
               : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
           }`}
         >
-          回到空白首頁
+          清除目前選取
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
         <div className={`mb-3 px-2 text-xs ${isDark ? "text-white/35" : "text-slate-400"}`}>
-          最近對話
+          對話列表
         </div>
 
         <div className="space-y-2">
@@ -94,7 +109,7 @@ export default function ChatSidebar({
                       isDark ? "text-white/45" : "text-slate-500"
                     }`}
                   >
-                    {chat.summary || "尚未開始對話"}
+                    {chat.summary || "目前尚無摘要"}
                   </div>
                 </button>
 
@@ -105,9 +120,9 @@ export default function ChatSidebar({
                       ? "bg-white/10 text-white/70 hover:bg-white/15"
                       : "bg-white text-slate-500 shadow hover:bg-slate-100"
                   }`}
-                  title="刪除此聊天室"
+                  title="刪除對話"
                 >
-                  ✕
+                  刪
                 </button>
               </div>
             );

@@ -6,10 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "mcp:weather": "node mcp-servers/weather-server.cjs",
+    "mcp:time": "node mcp-servers/time-server.cjs",
+    "mcp:search": "node mcp-servers/search-server.cjs",
+    "mcp:telegram": "node mcp-servers/telegram-server.cjs",
+    "mcp:discord": "node mcp-servers/discord-server.cjs"
   },
   "dependencies": {
     "@google/genai": "^1.46.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "next": "16.1.7",
     "openai": "^6.32.0",
     "react": "19.2.3",
